@@ -17,6 +17,8 @@ import {
   INITIAL_ACTIVITY_LOGS
 } from './data/mockData';
 import { LocalAIService } from './services/aiService';
+import { ApiClient } from './services/apiClient';
+import { RealtimeClient } from './services/realtimeClient';
 
 import { Navbar } from './components/Navbar';
 import { Sidebar, NavTab } from './components/Sidebar';
@@ -99,9 +101,38 @@ export default function App() {
     }, 4000);
   };
 
+  // Sync Current User with ApiClient and Connect Realtime SSE Stream
+  useEffect(() => {
+    ApiClient.setCurrentUser(currentUser);
+    if (currentUser) {
+      RealtimeClient.connect(currentUser.id, currentUser.role);
+      ApiClient.updateSalespersonStatus('ONLINE', 'Online & Softphone Active');
+    } else {
+      RealtimeClient.disconnect();
+    }
+  }, [currentUser]);
+
+  // Global Realtime Event Listener
+  useEffect(() => {
+    const unsubscribe = RealtimeClient.subscribe((event) => {
+      if (event.type === 'LEAD_ASSIGNED') {
+        showToast(`Lead assignment updated in real-time.`);
+      } else if (event.type === 'CALL_ENDED') {
+        if (event.data?.call) {
+          setCalls((prev) => {
+            const exists = prev.some((c) => c.id === event.data.call.id);
+            return exists ? prev : [event.data.call, ...prev];
+          });
+        }
+      }
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
   // Inbound Call Handlers
   const handleTriggerInboundCall = () => {
-    // Pick an uncontacted or high-priority lead from current list, or generate incoming prospect
     const candidateLead =
       leads.find((l) => l.priority === 'High' && l.status !== 'Converted') ||
       leads[Math.floor(Math.random() * leads.length)] ||
@@ -114,7 +145,7 @@ export default function App() {
         source: 'Website',
         priority: 'High',
         status: 'New',
-        assignedTo: currentUser?.id || 'sp-1',
+        assignedTo: currentUser?.id || 'sales-1',
         notes: 'Inbound customer inquiry submitted via website quote calculator.',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -139,18 +170,18 @@ export default function App() {
   const handleAcceptInboundCall = (lead: Lead) => {
     setIncomingCallLead(null);
     setActiveCallLead(lead);
+    ApiClient.updateSalespersonStatus('ON_CALL', `On Live Call with ${lead.name}`, lead.name);
     showToast(`Inbound WebRTC Call Connected with ${lead.name}`);
   };
 
   const handleDeclineInboundCall = (lead: Lead) => {
     setIncomingCallLead(null);
-    // Log missed / busy call attempt
     const missedCall: CallRecord = {
       id: `CALL-${Date.now().toString().slice(-5)}`,
       leadId: lead.id,
       leadName: lead.name,
       leadPhone: lead.phone,
-      salespersonId: currentUser?.id || 'sp-1',
+      salespersonId: currentUser?.id || 'sales-1',
       salespersonName: currentUser?.name || 'Sales Rep',
       startedAt: new Date().toISOString(),
       endedAt: new Date().toISOString(),
@@ -161,6 +192,15 @@ export default function App() {
       createdAt: new Date().toISOString()
     };
     setCalls((prev) => [missedCall, ...prev]);
+    ApiClient.logCompletedCall({
+      leadId: lead.id,
+      leadName: lead.name,
+      leadPhone: lead.phone,
+      durationSeconds: 0,
+      status: 'Busy',
+      outcome: 'Call Later',
+      notes: 'Inbound call rejected / busy'
+    }).catch(() => {});
     showToast(`Call from ${lead.name} declined (486 Busy recorded)`);
   };
 
@@ -169,7 +209,6 @@ export default function App() {
     const targetSp = users.find((u) => u.id === targetSalespersonId);
     if (!targetSp) return;
 
-    // Re-assign lead
     const updatedLead: Lead = {
       ...lead,
       assignedTo: targetSp.id,
@@ -178,7 +217,6 @@ export default function App() {
     };
     setLeads((prev) => prev.map((l) => (l.id === lead.id ? updatedLead : l)));
 
-    // Send notification to target rep
     const notif: NotificationItem = {
       id: `notif-${Date.now()}`,
       userId: targetSp.id,
@@ -238,11 +276,10 @@ export default function App() {
   // Handlers for Leads
   const handleAddLead = (newLead: Lead) => {
     setLeads((prev) => [newLead, ...prev]);
-    // Record activity
     const newAct: ActivityLog = {
       id: `act-${Date.now()}`,
-      userId: currentUser?.id || 'mgr-1',
-      userName: currentUser?.name || 'Aarav Singhania',
+      userId: currentUser?.id || 'usr-thara',
+      userName: currentUser?.name || 'Thara Maps',
       userRole: currentUser?.role || 'manager',
       action: 'Created Lead',
       entityType: 'Lead',
@@ -253,7 +290,6 @@ export default function App() {
     };
     setActivityLogs((prev) => [newAct, ...prev]);
 
-    // Send notification to assigned rep
     const notif: NotificationItem = {
       id: `notif-${Date.now()}`,
       userId: newLead.assignedTo,
@@ -273,7 +309,7 @@ export default function App() {
     setLeads((prev) => [...importedLeads, ...prev]);
     const newAct: ActivityLog = {
       id: `act-${Date.now()}`,
-      userId: currentUser?.id || 'mgr-1',
+      userId: currentUser?.id || 'usr-thara',
       userName: currentUser?.name || 'Manager',
       userRole: 'manager',
       action: 'Imported CSV',
@@ -288,7 +324,6 @@ export default function App() {
   };
 
   const handleUpdateLead = (updated: Lead) => {
-    // Re-score lead
     const freshAnalysis = LocalAIService.scoreLead(updated);
     const enriched = { ...updated, aiAnalysis: freshAnalysis };
 
@@ -310,6 +345,11 @@ export default function App() {
     const targetRep = users.find((u) => u.id === targetSalespersonId);
     if (!targetRep) return;
 
+    // Call real backend assignment API
+    ApiClient.assignLead(leadIds, targetSalespersonId).catch((err) => {
+      console.warn('Backend assign lead error:', err);
+    });
+
     setLeads((prev) =>
       prev.map((l) =>
         leadIds.includes(l.id)
@@ -325,7 +365,7 @@ export default function App() {
 
     const newAct: ActivityLog = {
       id: `act-${Date.now()}`,
-      userId: currentUser?.id || 'mgr-1',
+      userId: currentUser?.id || 'usr-thara',
       userName: currentUser?.name || 'Manager',
       userRole: 'manager',
       action: 'Reassigned Leads',
@@ -337,7 +377,6 @@ export default function App() {
     };
     setActivityLogs((prev) => [newAct, ...prev]);
 
-    // Send notification
     const notif: NotificationItem = {
       id: `notif-${Date.now()}`,
       userId: targetRep.id,
@@ -356,6 +395,7 @@ export default function App() {
   const handleStartCall = (lead: Lead) => {
     if (selectedLeadForDetail) setSelectedLeadForDetail(null);
     setActiveCallLead(lead);
+    ApiClient.updateSalespersonStatus('ON_CALL', `Dialing ${lead.name}`, lead.name);
   };
 
   const handleEndAndSaveCall = (
@@ -364,6 +404,20 @@ export default function App() {
     newLeadStatus?: Lead['status']
   ) => {
     setCalls((prev) => [callRecord, ...prev]);
+
+    // Send call to real backend API to store in database and trigger AI intelligence pipeline
+    ApiClient.logCompletedCall({
+      leadId: callRecord.leadId,
+      leadName: callRecord.leadName,
+      leadPhone: callRecord.leadPhone,
+      durationSeconds: callRecord.durationSeconds,
+      status: callRecord.status,
+      outcome: callRecord.outcome,
+      notes: callRecord.notes,
+      transcripts: callRecord.realTimeInsights?.transcripts
+    }).catch((err) => console.warn('Backend call logging:', err));
+
+    ApiClient.updateSalespersonStatus('ONLINE', 'Call completed & logged');
 
     // Update Lead last contacted & status
     setLeads((prev) =>
@@ -413,7 +467,6 @@ export default function App() {
   const handleScheduleFollowUp = (newFollowUp: FollowUp) => {
     setFollowUps((prev) => [newFollowUp, ...prev]);
 
-    // Update target lead nextFollowUpAt
     setLeads((prev) =>
       prev.map((l) => {
         if (l.id === newFollowUp.leadId) {
@@ -475,7 +528,6 @@ export default function App() {
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
   };
 
-  // Filter Salespeople only
   const salespeople = users.filter((u) => u.role === 'salesperson');
 
   // If not logged in, show AuthView
@@ -495,7 +547,6 @@ export default function App() {
     );
   }
 
-  // Overdue followups count for badge
   const overdueCount = followUps.filter(
     (f) =>
       (f.status === 'Overdue' ||
@@ -530,7 +581,7 @@ export default function App() {
         onLogout={() => {
           localStorage.removeItem('salescall_current_user');
           setCurrentUser(null);
-          showToast('Signed out of Gmail account successfully');
+          showToast('Signed out successfully');
         }}
         notifications={notifications}
         onMarkNotificationRead={handleMarkNotificationRead}
@@ -567,6 +618,7 @@ export default function App() {
               onOpenLeadDetail={(lead) => setSelectedLeadForDetail(lead)}
               onOpenAssignModal={(targetLeads) => setAssignModalLeads(targetLeads)}
               onNavigateTab={(tab) => handleSelectTab(tab)}
+              onSelectSalespersonDetail={() => handleSelectTab('users')}
             />
           )}
 
@@ -656,14 +708,6 @@ export default function App() {
         </main>
       </div>
 
-      {/* Floating Role Notification Pill */}
-      <div className="fixed bottom-6 right-8 bg-[#00f2ff] text-black px-4 py-2 rounded-full shadow-[0_4px_20px_rgba(0,242,255,0.4)] flex items-center gap-2 z-20 pointer-events-none select-none">
-        <span className="text-[10px] font-black uppercase tracking-tighter">
-          {currentUser.role === 'manager' ? 'Live Manager View' : 'Live Sales Rep View'}
-        </span>
-        <div className="w-1.5 h-1.5 bg-black rounded-full animate-pulse" />
-      </div>
-
       {/* Active Calling Drawer Screen */}
       {activeCallLead && (
         <CallingDrawer
@@ -671,7 +715,10 @@ export default function App() {
           currentUser={currentUser}
           allSalespeople={salespeople}
           onEndAndSaveCall={handleEndAndSaveCall}
-          onCancelCall={() => setActiveCallLead(null)}
+          onCancelCall={() => {
+            setActiveCallLead(null);
+            ApiClient.updateSalespersonStatus('ONLINE', 'Ready in queue');
+          }}
         />
       )}
 

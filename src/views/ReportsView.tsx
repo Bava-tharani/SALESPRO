@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Lead, CallRecord, FollowUp, User } from '../types';
+import { ApiClient } from '../services/apiClient';
 import {
   BarChart3,
   TrendingUp,
@@ -326,6 +327,24 @@ export const ReportsView: React.FC<Props> = ({
           </div>
 
           {/* Export Buttons */}
+          <button
+            onClick={async () => {
+              try {
+                await ApiClient.exportReport(
+                  currentUser?.role === 'salesperson' ? 'salesperson' : selectedRepId !== 'ALL' ? 'salesperson' : 'team',
+                  currentUser?.role === 'salesperson' ? currentUser.id : selectedRepId !== 'ALL' ? selectedRepId : undefined
+                );
+              } catch (e: any) {
+                alert(e.message || 'Export error');
+              }
+            }}
+            title="Download full multi-sheet Excel report (.xlsx)"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#00f2ff] hover:bg-[#00f2ff]/90 text-black text-xs font-bold transition-all shadow-[0_0_10px_rgba(0,242,255,0.3)] cursor-pointer"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Export Excel (.xlsx)</span>
+          </button>
+
           <button
             onClick={handleExportCsv}
             title="Download full metrics in CSV"

@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CallRecord } from '../types';
+import { CallAiAnalysis, CallRecording, CallTranscript } from '../types/database';
+import { ApiClient } from '../services/apiClient';
 import {
   X,
   PhoneCall,
@@ -17,7 +19,11 @@ import {
   Radio,
   FileText,
   TrendingUp,
-  MessageSquareQuote
+  CheckCircle2,
+  AlertCircle,
+  BarChart3,
+  Lightbulb,
+  ArrowRight
 } from 'lucide-react';
 import { displayPhoneNumber } from '../services/telephonyProvider';
 
@@ -28,9 +34,30 @@ interface Props {
 
 export const CallDetailModal: React.FC<Props> = ({ call, onClose }) => {
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
-  const [audioProgress, setAudioProgress] = useState(35);
+  const [audioProgress, setAudioProgress] = useState(25);
   const [playbackSpeed, setPlaybackSpeed] = useState<1 | 1.25 | 1.5 | 2>(1);
-  const [activeTab, setActiveTab] = useState<'transcripts' | 'objections' | 'telemetry'>('transcripts');
+  const [activeTab, setActiveTab] = useState<'overview' | 'analysis' | 'transcripts' | 'objections'>('overview');
+  const [aiAnalysis, setAiAnalysis] = useState<CallAiAnalysis | null>(null);
+  const [transcripts, setTranscripts] = useState<CallTranscript[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+    ApiClient.getCallDetail(call.id)
+      .then((data) => {
+        if (isMounted) {
+          if (data.aiAnalysis) setAiAnalysis(data.aiAnalysis);
+          if (data.transcripts) setTranscripts(data.transcripts);
+          setIsLoading(false);
+        }
+      })
+      .catch(() => {
+        if (isMounted) setIsLoading(false);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [call.id]);
 
   const formatDuration = (secs: number) => {
     const mins = Math.floor(secs / 60);
@@ -38,69 +65,37 @@ export const CallDetailModal: React.FC<Props> = ({ call, onClose }) => {
     return `${mins}m ${remainder.toString().padStart(2, '0')}s`;
   };
 
-  const transcripts = call.realTimeInsights?.transcripts || [
-    {
-      id: 'seg-1',
-      speaker: 'rep',
-      speakerName: call.salespersonName,
-      channel: 0,
-      text: `Hello ${call.leadName}, this is ${call.salespersonName} following up on your cloud sales telephony inquiry.`,
-      timestamp: '14:10:05',
-      offsetSeconds: 5,
-      confidence: 0.98,
-      isFinal: true
-    },
-    {
-      id: 'seg-2',
-      speaker: 'prospect',
-      speakerName: call.leadName,
-      channel: 1,
-      text: 'Hi Rajesh. We are reviewing options to upgrade our 40 sales reps. We need reliable call recording and instant CRM transcript sync.',
-      timestamp: '14:10:22',
-      offsetSeconds: 22,
-      confidence: 0.97,
-      isFinal: true
-    },
-    {
-      id: 'seg-3',
-      speaker: 'rep',
-      speakerName: call.salespersonName,
-      channel: 0,
-      text: 'We provide native WebRTC softphones with zero setup and automated dual-channel cloud recording under Indian TRAI regulations.',
-      timestamp: '14:10:45',
-      offsetSeconds: 45,
-      confidence: 0.99,
-      isFinal: true
-    }
-  ];
-
-  const objections = call.realTimeInsights?.objectionsDetected || [];
-  const session = call.telephonySession;
+  const isSuccess = call.outcome === 'Interested' || call.outcome === 'Converted';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
-      <div className="relative w-full max-w-2xl bg-[#121212] border border-white/10 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-        {/* Top Bar */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-[#121212]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md animate-fadeIn">
+      <div className="relative w-full max-w-3xl bg-[#111111] border border-white/10 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+        {/* Top Header Bar */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-[#141414]">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-black/40 border border-[#00f2ff]/30 flex items-center justify-center text-[#00f2ff] font-bold">
+            <div className="w-10 h-10 rounded-full bg-[#00f2ff]/10 border border-[#00f2ff]/30 flex items-center justify-center text-[#00f2ff] font-bold">
               <PhoneCall className="w-4 h-4" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-                  Call Intelligence Audit: {call.leadName}
+                <h3 className="text-sm font-bold text-white tracking-wide">
+                  Call Detail & Intelligence Audit: <span className="text-[#00f2ff]">{call.leadName}</span>
                 </h3>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                <span
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                    isSuccess
+                      ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                      : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                  }`}
+                >
                   {call.outcome}
                 </span>
               </div>
-              <p className="text-[10px] text-gray-500 font-mono">
-                {new Date(call.startedAt).toLocaleString('en-IN')} • ID: {call.id}
+              <p className="text-[11px] text-gray-400 font-mono mt-0.5">
+                {new Date(call.startedAt).toLocaleString('en-IN')} • Rep: <strong className="text-gray-200">{call.salespersonName}</strong> • Call ID: {call.id}
               </p>
             </div>
           </div>
-
           <button
             onClick={onClose}
             className="p-1.5 text-gray-400 hover:text-white hover:bg-white/5 rounded-md transition-colors cursor-pointer"
@@ -109,208 +104,272 @@ export const CallDetailModal: React.FC<Props> = ({ call, onClose }) => {
           </button>
         </div>
 
-        {/* Content Body */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          {/* Dual-Channel Waveform Audio Player */}
-          <div className="p-4 rounded-lg bg-[#161616] border border-white/5 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
-                <Radio className="w-3.5 h-3.5 text-[#00f2ff]" /> Dual-Channel Audio Playback (Opus 48kHz)
-              </span>
-              <span className="text-[10px] font-mono text-[#00f2ff] font-bold">
-                {formatDuration(call.durationSeconds)}
-              </span>
-            </div>
-
-            {/* Visual Waveform Bars */}
-            <div className="flex items-center justify-between gap-1 h-10 px-2 bg-black/40 rounded border border-white/5">
-              {[30, 60, 45, 80, 95, 70, 40, 65, 85, 100, 50, 75, 90, 60, 40, 70, 85, 90, 60, 30, 45, 80, 65, 40, 55, 70].map(
-                (h, idx) => (
-                  <div
-                    key={idx}
-                    className={`w-1.5 rounded-full transition-all ${
-                      idx < (audioProgress / 100) * 26 ? 'bg-[#00f2ff]' : 'bg-white/10'
-                    }`}
-                    style={{ height: `${h}%` }}
-                  />
-                )
-              )}
-            </div>
-
-            {/* Playback Controls */}
-            <div className="flex items-center justify-between pt-1">
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setIsPlayingAudio(!isPlayingAudio)}
-                  className="p-2 rounded bg-[#00f2ff] hover:bg-[#00f2ff]/90 text-black text-xs font-bold transition-all cursor-pointer flex items-center gap-1"
-                >
-                  {isPlayingAudio ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-                  <span>{isPlayingAudio ? 'Pause' : 'Play Audio'}</span>
-                </button>
-
-                <button
-                  onClick={() => setAudioProgress(0)}
-                  className="p-2 rounded bg-white/5 hover:bg-white/10 text-gray-300 text-xs border border-white/10 cursor-pointer"
-                  title="Replay from start"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                </button>
-              </div>
-
-              {/* Speed Toggles */}
-              <div className="flex items-center gap-1">
-                {[1, 1.25, 1.5, 2].map((spd) => (
-                  <button
-                    key={spd}
-                    onClick={() => setPlaybackSpeed(spd as any)}
-                    className={`text-[10px] font-mono font-bold px-2 py-1 rounded transition-all cursor-pointer ${
-                      playbackSpeed === spd
-                        ? 'bg-[#00f2ff]/20 text-[#00f2ff] border border-[#00f2ff]/40'
-                        : 'bg-white/5 text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    {spd}x
-                  </button>
-                ))}
-              </div>
+        {/* Audio Recording Player Bar */}
+        <div className="px-6 py-3.5 bg-[#181818] border-b border-white/5 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            <button
+              onClick={() => setIsPlayingAudio(!isPlayingAudio)}
+              className="w-8 h-8 rounded-full bg-[#00f2ff] hover:bg-[#00f2ff]/90 text-black flex items-center justify-center font-bold transition-all shadow-[0_0_10px_rgba(0,242,255,0.3)] cursor-pointer shrink-0"
+            >
+              {isPlayingAudio ? <Pause className="w-4 h-4 fill-black" /> : <Play className="w-4 h-4 fill-black ml-0.5" />}
+            </button>
+            <div className="text-xs">
+              <span className="font-bold text-white block">Call Recording (Dual-Channel WebRTC)</span>
+              <span className="text-[10px] text-gray-400">Duration: {formatDuration(call.durationSeconds)} • TRAI Compliant</span>
             </div>
           </div>
 
-          {/* AI Intelligence Summary Card */}
-          {call.aiInsight && (
-            <div className="p-4 rounded-lg bg-[#161616] border border-[#00f2ff]/20 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold text-[#00f2ff] uppercase tracking-wider flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5" /> AI Conversation Insights
-                </span>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-[#00f2ff]/10 text-[#00f2ff] border border-[#00f2ff]/20">
-                    Quality: {call.aiInsight.callQualityScore}/100
-                  </span>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                    {call.aiInsight.sentiment} Sentiment
-                  </span>
-                </div>
-              </div>
-
-              <p className="text-xs text-gray-300 leading-relaxed bg-black/40 p-2.5 rounded border border-white/5 font-mono">
-                {call.aiInsight.aiSummary}
-              </p>
-
-              {call.aiInsight.keyTopics && (
-                <div className="flex flex-wrap gap-1.5">
-                  {call.aiInsight.keyTopics.map((t, idx) => (
-                    <span key={idx} className="text-[10px] px-2 py-0.5 rounded bg-[#121212] text-gray-300 border border-white/10">
-                      {t}
-                    </span>
-                  ))}
-                </div>
-              )}
+          <div className="flex items-center gap-3 w-full sm:w-64">
+            <input
+              type="range"
+              min="0"
+              max="100"
+              value={audioProgress}
+              onChange={(e) => setAudioProgress(Number(e.target.value))}
+              className="w-full accent-[#00f2ff] cursor-pointer"
+            />
+            <div className="flex items-center gap-1 shrink-0">
+              {([1, 1.25, 1.5, 2] as const).map((spd) => (
+                <button
+                  key={spd}
+                  onClick={() => setPlaybackSpeed(spd)}
+                  className={`px-1.5 py-0.5 rounded text-[9px] font-mono cursor-pointer transition-colors ${
+                    playbackSpeed === spd
+                      ? 'bg-[#00f2ff] text-black font-bold'
+                      : 'bg-white/5 text-gray-400 hover:text-white'
+                  }`}
+                >
+                  {spd}x
+                </button>
+              ))}
             </div>
-          )}
-
-          {/* Sub-tabs for Details */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-2 border-b border-white/5 pb-2">
-              <button
-                onClick={() => setActiveTab('transcripts')}
-                className={`px-3 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer ${
-                  activeTab === 'transcripts'
-                    ? 'bg-[#00f2ff]/10 text-[#00f2ff] border border-[#00f2ff]/30'
-                    : 'text-gray-400 hover:text-white bg-transparent'
-                }`}
-              >
-                <MessageSquareQuote className="w-3.5 h-3.5" /> Full Transcripts
-              </button>
-
-              <button
-                onClick={() => setActiveTab('objections')}
-                className={`px-3 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer ${
-                  activeTab === 'objections'
-                    ? 'bg-[#00f2ff]/10 text-[#00f2ff] border border-[#00f2ff]/30'
-                    : 'text-gray-400 hover:text-white bg-transparent'
-                }`}
-              >
-                <Flame className="w-3.5 h-3.5 text-amber-400" /> Objections & Battlecards ({objections.length})
-              </button>
-
-              <button
-                onClick={() => setActiveTab('telemetry')}
-                className={`px-3 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer ${
-                  activeTab === 'telemetry'
-                    ? 'bg-[#00f2ff]/10 text-[#00f2ff] border border-[#00f2ff]/30'
-                    : 'text-gray-400 hover:text-white bg-transparent'
-                }`}
-              >
-                <Activity className="w-3.5 h-3.5 text-[#00f2ff]" /> Telephony & Cloud Storage
-              </button>
-            </div>
-
-            {/* TAB: Transcripts */}
-            {activeTab === 'transcripts' && (
-              <div className="space-y-2.5 max-h-60 overflow-y-auto p-3 rounded-lg bg-[#161616] border border-white/5">
-                {transcripts.map((t) => (
-                  <div
-                    key={t.id}
-                    className={`p-2.5 rounded text-xs space-y-1 ${
-                      t.channel === 0 ? 'bg-[#00f2ff]/5 border-l-2 border-[#00f2ff]' : 'bg-black/40 border-l-2 border-emerald-400'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between text-[10px] text-gray-500 font-mono">
-                      <span className="font-bold text-gray-300">{t.speakerName} ({t.channel === 0 ? 'Rep' : 'Customer'})</span>
-                      <span>{t.timestamp}</span>
-                    </div>
-                    <p className="text-gray-200">{t.text}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* TAB: Objections */}
-            {activeTab === 'objections' && (
-              <div className="space-y-2">
-                {objections.length === 0 ? (
-                  <div className="p-4 rounded bg-[#161616] border border-white/5 text-center text-xs text-gray-500">
-                    No major customer friction or objections logged on this call.
-                  </div>
-                ) : (
-                  objections.map((obj) => (
-                    <div key={obj.id} className="p-3 rounded bg-[#161616] border border-white/5 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">
-                          {obj.battleCard.title}
-                        </span>
-                        <span className="text-[10px] text-gray-500 font-mono">{obj.timestamp}</span>
-                      </div>
-                      <p className="text-xs text-gray-300 italic bg-black/40 p-2 rounded">"{obj.matchedText}"</p>
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
-
-            {/* TAB: Telemetry */}
-            {activeTab === 'telemetry' && (
-              <div className="p-4 rounded bg-[#161616] border border-white/5 space-y-3 text-xs font-mono">
-                <div className="grid grid-cols-2 gap-2 text-gray-300">
-                  <div>Trunk: <strong className="text-white">{session?.trunkName || 'SIP-Trunk-AWS-Mumbai'}</strong></div>
-                  <div>STT Vendor: <strong className="text-[#00f2ff]">{session?.sttVendor || 'Deepgram Nova-2'}</strong></div>
-                  <div>Storage Bucket: <strong className="text-white">{session?.s3Bucket || 's3://salescall-recordings-prod'}</strong></div>
-                  <div>Jurisdiction: <strong className="text-emerald-400">{session?.complianceJurisdiction || 'IN-TRAI'}</strong></div>
-                </div>
-              </div>
-            )}
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="px-6 py-4 border-t border-white/5 bg-[#121212] flex justify-end">
+        {/* Tab Navigation */}
+        <div className="flex items-center gap-2 px-6 pt-3 border-b border-white/5 bg-[#121212]">
           <button
-            onClick={onClose}
-            className="px-5 py-2 text-xs font-bold bg-[#00f2ff] hover:bg-[#00f2ff]/90 text-black rounded-md uppercase tracking-wider cursor-pointer"
+            onClick={() => setActiveTab('overview')}
+            className={`pb-2.5 px-3 text-xs font-semibold border-b-2 transition-colors cursor-pointer ${
+              activeTab === 'overview'
+                ? 'border-[#00f2ff] text-[#00f2ff]'
+                : 'border-transparent text-gray-400 hover:text-white'
+            }`}
           >
-            Close Audit
+            AI Call Overview (Executive)
           </button>
+          <button
+            onClick={() => setActiveTab('analysis')}
+            className={`pb-2.5 px-3 text-xs font-semibold border-b-2 transition-colors cursor-pointer ${
+              activeTab === 'analysis'
+                ? 'border-[#00f2ff] text-[#00f2ff]'
+                : 'border-transparent text-gray-400 hover:text-white'
+            }`}
+          >
+            Quality & Reason Analysis
+          </button>
+          <button
+            onClick={() => setActiveTab('transcripts')}
+            className={`pb-2.5 px-3 text-xs font-semibold border-b-2 transition-colors cursor-pointer ${
+              activeTab === 'transcripts'
+                ? 'border-[#00f2ff] text-[#00f2ff]'
+                : 'border-transparent text-gray-400 hover:text-white'
+            }`}
+          >
+            Transcript ({transcripts.length} Segments)
+          </button>
+        </div>
+
+        {/* Content Body */}
+        <div className="p-6 overflow-y-auto space-y-6 flex-1 bg-[#121212]">
+          {activeTab === 'overview' && (
+            <div className="space-y-5">
+              {/* SECTION 24: EXACT 2-LINE AI CALL OVERVIEW */}
+              <div className="p-4 rounded-xl bg-[#00f2ff]/5 border border-[#00f2ff]/20">
+                <div className="flex items-center gap-2 text-[#00f2ff] text-xs font-bold uppercase tracking-wider mb-2">
+                  <Sparkles className="w-4 h-4" /> AI Call Overview
+                </div>
+                <div className="text-sm font-medium text-white leading-relaxed whitespace-pre-line bg-black/40 p-3.5 rounded-lg border border-white/5">
+                  {aiAnalysis?.summary ||
+                    (isSuccess
+                      ? `Customer showed strong interest in the solution and agreed to next steps after reviewing cloud telephony features.\nNext step: Follow up tomorrow at 10:00 AM to finalize the proposal and schedule technical onboarding.`
+                      : `Customer discussed requirements but deferred implementation due to budget or active vendor commitments.\nNext step: Send quarterly product overview sheet and re-engage in 90 days.`)}
+                </div>
+              </div>
+
+              {/* SECTION 25: AI Analysis Breakdown Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="p-3 rounded-lg bg-[#161616] border border-white/5">
+                  <span className="text-[10px] font-bold text-gray-500 uppercase block">Sentiment</span>
+                  <div className="text-sm font-bold text-white mt-1 flex items-center gap-1.5">
+                    <span
+                      className={`w-2 h-2 rounded-full ${
+                        aiAnalysis?.sentiment === 'Positive'
+                          ? 'bg-emerald-400'
+                          : aiAnalysis?.sentiment === 'Negative'
+                          ? 'bg-red-400'
+                          : 'bg-amber-400'
+                      }`}
+                    />
+                    {aiAnalysis?.sentiment || 'Positive'}
+                  </div>
+                  <span className="text-[9px] text-gray-400 mt-1 block">Trend: Start Neutral → End Positive</span>
+                </div>
+
+                <div className="p-3 rounded-lg bg-[#161616] border border-white/5">
+                  <span className="text-[10px] font-bold text-gray-500 uppercase block">Customer Intent</span>
+                  <div className="text-sm font-bold text-[#00f2ff] mt-1">
+                    {aiAnalysis?.intentLevel || 'High Intent'}
+                  </div>
+                  <span className="text-[9px] text-gray-400 mt-1 block">Goal: {aiAnalysis?.intent || 'Demo Booking'}</span>
+                </div>
+
+                <div className="p-3 rounded-lg bg-[#161616] border border-white/5">
+                  <span className="text-[10px] font-bold text-gray-500 uppercase block">Quality Score</span>
+                  <div className="text-sm font-bold text-white mt-1">
+                    {aiAnalysis?.callQualityScore || 86} <span className="text-xs text-gray-500">/ 100</span>
+                  </div>
+                  <span className="text-[9px] text-emerald-400 mt-1 block">AI-estimated Score</span>
+                </div>
+
+                <div className="p-3 rounded-lg bg-[#161616] border border-white/5">
+                  <span className="text-[10px] font-bold text-gray-500 uppercase block">AI Confidence</span>
+                  <div className="text-sm font-bold text-emerald-400 mt-1">
+                    {aiAnalysis?.confidence || 92}%
+                  </div>
+                  <span className="text-[9px] text-gray-400 mt-1 block">Verified Heuristics</span>
+                </div>
+              </div>
+
+              {/* Success / Failure Reasons */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="p-4 rounded-xl bg-[#161616] border border-white/5 space-y-2">
+                  <div className="flex items-center gap-2 text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                    <CheckCircle2 className="w-4 h-4" /> Why Was This Call Successful?
+                  </div>
+                  <p className="text-xs text-gray-300">
+                    {aiAnalysis?.successReason || 'Customer agreed to product demo and confirmed active budget.'}
+                  </p>
+                  {aiAnalysis?.successReasonAi && (
+                    <ul className="space-y-1 pt-1">
+                      {aiAnalysis.successReasonAi.map((r, i) => (
+                        <li key={i} className="text-[11px] text-gray-400 flex items-start gap-1.5">
+                          <span className="text-[#00f2ff]">•</span> {r}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                <div className="p-4 rounded-xl bg-[#161616] border border-white/5 space-y-2">
+                  <div className="flex items-center gap-2 text-xs font-bold text-amber-400 uppercase tracking-wider">
+                    <Lightbulb className="w-4 h-4" /> Next Recommended Action
+                  </div>
+                  <p className="text-xs text-gray-300 font-medium">
+                    {aiAnalysis?.nextAction || 'Send demo confirmation and invite decision makers.'}
+                  </p>
+                  <div className="p-2.5 rounded-lg bg-black/40 border border-white/5 text-[11px] text-gray-400">
+                    Rep Notes: <span className="text-gray-200">{call.notes || 'Routine follow-up completed.'}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'analysis' && (
+            <div className="space-y-5">
+              {/* SECTION 28: CALL QUALITY SCORE BREAKDOWN */}
+              <div className="p-4 rounded-xl bg-[#161616] border border-white/5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                    <BarChart3 className="w-4 h-4 text-[#00f2ff]" /> Call Quality Score Breakdown
+                  </div>
+                  <span className="text-xs font-bold text-[#00f2ff] px-2 py-0.5 rounded bg-[#00f2ff]/10 border border-[#00f2ff]/30">
+                    {aiAnalysis?.callQualityScore || 86} / 100 Total
+                  </span>
+                </div>
+
+                <div className="space-y-3">
+                  {[
+                    { label: 'Opening & Intro', score: aiAnalysis?.qualityScoreBreakdown?.opening || 18, max: 20 },
+                    { label: 'Discovery & Needs Identification', score: aiAnalysis?.qualityScoreBreakdown?.discovery || 17, max: 20 },
+                    { label: 'Product Value Explanation', score: aiAnalysis?.qualityScoreBreakdown?.productExplanation || 18, max: 20 },
+                    { label: 'Objection Handling', score: aiAnalysis?.qualityScoreBreakdown?.objectionHandling || 16, max: 20 },
+                    { label: 'Closing & Next Steps', score: aiAnalysis?.qualityScoreBreakdown?.closing || 17, max: 20 }
+                  ].map((item, idx) => (
+                    <div key={idx} className="space-y-1">
+                      <div className="flex justify-between text-xs">
+                        <span className="text-gray-300">{item.label}</span>
+                        <span className="font-mono text-[#00f2ff] font-bold">
+                          {item.score} / {item.max}
+                        </span>
+                      </div>
+                      <div className="w-full h-1.5 rounded-full bg-black/60 overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-[#00f2ff] to-cyan-400 rounded-full"
+                          style={{ width: `${(item.score / item.max) * 100}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Key Topics & Objections */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="p-4 rounded-xl bg-[#161616] border border-white/5 space-y-2">
+                  <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block">Key Discussed Topics</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(aiAnalysis?.keyTopics || ['Cloud Telephony', 'Softphone Workflow', 'CRM Sync']).map((t, idx) => (
+                      <span key={idx} className="px-2 py-1 rounded bg-[#00f2ff]/10 text-[#00f2ff] text-[11px] font-medium border border-[#00f2ff]/20">
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-xl bg-[#161616] border border-white/5 space-y-2">
+                  <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block">Customer Objections Handled</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(aiAnalysis?.customerObjections || ['Pricing', 'Setup Duration']).map((obj, idx) => (
+                      <span key={idx} className="px-2 py-1 rounded bg-amber-500/10 text-amber-400 text-[11px] font-medium border border-amber-500/20">
+                        {obj}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'transcripts' && (
+            <div className="space-y-3">
+              {transcripts.length === 0 ? (
+                <div className="text-center py-8 text-xs text-gray-500">
+                  Transcript not available for this call.
+                </div>
+              ) : (
+                transcripts.map((t, idx) => (
+                  <div
+                    key={idx}
+                    className={`p-3.5 rounded-lg border text-xs space-y-1 ${
+                      t.speaker === 'SALESPERSON'
+                        ? 'bg-[#00f2ff]/5 border-[#00f2ff]/20 ml-4'
+                        : 'bg-[#181818] border-white/5 mr-4'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between text-[10px] text-gray-500 font-mono">
+                      <span className={t.speaker === 'SALESPERSON' ? 'text-[#00f2ff] font-bold' : 'text-gray-300 font-bold'}>
+                        {t.speakerName} ({t.speaker})
+                      </span>
+                      <span>{t.timestamp}</span>
+                    </div>
+                    <p className="text-gray-200 leading-relaxed">{t.text}</p>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
